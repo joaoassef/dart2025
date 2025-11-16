@@ -61,7 +61,7 @@ class _MainAppState extends State<MainApp> {
   }
 
   Future<Map<String, double>> buscarClima(double latitude, double longitude) async {
-    const apiKey = '5d5c8f1e3b8c4a0b9d7f123456789abc'; 
+    const apiKey = 'c1ade390f11942d76c77c177f48a8aa5'; 
     final url =
         'https://api.openweathermap.org/data/2.5/weather?lat=$latitude&lon=$longitude&appid=$apiKey&units=metric&lang=pt_br';
 
