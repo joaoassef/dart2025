@@ -1,0 +1,333 @@
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+void main() {
+  runApp(MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Wiki English Learning',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(primarySwatch: Colors.blue),
+      home: HomePage(),
+    );
+  }
+}
+
+class HomePage extends StatefulWidget {
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  final TextEditingController _controller = TextEditingController();
+  String _paragraph = '';
+  Map<String, bool> _knownWords = {};
+
+  Future<void> fetchWikipedia(String url) async {
+    try {
+      if (!url.startsWith('https://en.wikipedia.org/wiki/')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Use a valid English Wikipedia link')),
+        );
+        return;
+      }
+      final uri = Uri.tryParse(url);
+      if (uri == null || !uri.path.contains('/wiki/')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Use a valid English Wikipedia link')),
+        );
+        return;
+      }
+      final title = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : '';
+      final encodedTitle = Uri.encodeComponent(title);
+      final response = await http.get(
+        Uri.parse(
+          'https://en.wikipedia.org/api/rest_v1/page/summary/$encodedTitle',
+        ),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          _paragraph = data['extract'] ?? '';
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not fetch the Wikipedia summary')),
+        );
+      }
+    } catch (e) {
+      print(e);
+    }
+  }
+
+  void openWordDefinition(String word) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WordPage(
+          word: word,
+          onMarkKnown: () {
+            setState(() {
+              _knownWords[word.toLowerCase()] = true;
+            });
+          },
+        ),
+      ),
+    );
+  }
+
+  void openKnownWords() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => KnownWordsPage(
+          knownWords: _knownWords,
+          onUnmark: (word) {
+            setState(() {
+              _knownWords.remove(word.toLowerCase());
+            });
+          },
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final words = _paragraph.split(RegExp(r'(\s+)'));
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Wiki English Learning'),
+        actions: [
+          IconButton(icon: Icon(Icons.list), onPressed: openKnownWords),
+        ],
+      ),
+      body: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          children: [
+            TextField(
+              controller: _controller,
+              decoration: InputDecoration(
+                hintText: 'Paste Wikipedia URL',
+                suffixIcon: IconButton(
+                  icon: Icon(Icons.search),
+                  onPressed: () => fetchWikipedia(_controller.text),
+                ),
+              ),
+            ),
+            SizedBox(height: 20),
+            Expanded(
+              child: SingleChildScrollView(
+                child: _paragraph.isEmpty
+                    ? Text('Paste a Wikipedia URL above.')
+                    : Wrap(
+                        children: words.map((word) {
+                          final cleanWord = word.replaceAll(
+                            RegExp(r"[^\w]"),
+                            '',
+                          );
+                          final normalized = cleanWord.toLowerCase();
+                          if (_knownWords[normalized] == true ||
+                              cleanWord.isEmpty) {
+                            return Text(word);
+                          } else {
+                            return GestureDetector(
+                              onTap: () => openWordDefinition(normalized),
+                              child: Container(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 2,
+                                  vertical: 1,
+                                ),
+                                margin: EdgeInsets.symmetric(
+                                  horizontal: 1,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.shade100,
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: Text(
+                                  word,
+                                  style: TextStyle(color: Colors.blue.shade900),
+                                ),
+                              ),
+                            );
+                          }
+                        }).toList(),
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+}
+
+class WordPage extends StatefulWidget {
+  final String word;
+  final VoidCallback onMarkKnown;
+  WordPage({required this.word, required this.onMarkKnown});
+
+  @override
+  State<WordPage> createState() => _WordPageState();
+}
+
+class _WordPageState extends State<WordPage> {
+  Map<String, dynamic>? _definitionData;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchDefinition(widget.word);
+  }
+
+  Future<void> fetchDefinition(String word) async {
+    try {
+      final response = await http.get(
+        Uri.parse('https://api.dictionaryapi.dev/api/v2/entries/en/$word'),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          _definitionData = data[0];
+        });
+      } else {
+        setState(() {
+          _definitionData = {'meanings': [], 'phonetics': []};
+        });
+      }
+    } catch (e) {
+      print(e);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final phonetics = _definitionData?['phonetics'] ?? [];
+    final audioUrl = phonetics.isNotEmpty ? phonetics[0]['audio'] ?? '' : '';
+
+    final displayWord = widget.word.isNotEmpty
+        ? '${widget.word[0].toUpperCase()}${widget.word.substring(1)}'
+        : widget.word;
+
+    return Scaffold(
+      appBar: AppBar(title: Text(displayWord)),
+      body: Padding(
+        padding: EdgeInsets.all(16),
+        child: _definitionData == null
+            ? Center(child: CircularProgressIndicator())
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    displayWord,
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 10),
+                  if (audioUrl.isNotEmpty)
+                    ElevatedButton(
+                      onPressed: () {
+                        // para simplificar, podemos usar url_launcher ou audioplayers
+                        // aqui apenas print do link
+                        print('Play audio: $audioUrl');
+                      },
+                      child: Text('Play Pronunciation'),
+                    ),
+                  SizedBox(height: 10),
+                  Expanded(
+                    child: (_definitionData?['meanings'] ?? []).isEmpty
+                        ? Center(child: Text('No definition found'))
+                        : ListView(
+                            children: (_definitionData?['meanings'] ?? [])
+                                .map<Widget>(
+                                  (meaning) => Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        meaning['partOfSpeech'] ?? '',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      ...((meaning['definitions'] ?? [])
+                                              as List)
+                                          .map<Widget>(
+                                            (d) => Text('• ${d['definition']}'),
+                                          )
+                                          .toList(),
+                                      SizedBox(height: 10),
+                                    ],
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                  ),
+                  ElevatedButton(
+                    onPressed: () {
+                      widget.onMarkKnown();
+                      Navigator.pop(context);
+                    },
+                    child: Text('I Understand this Word'),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class KnownWordsPage extends StatefulWidget {
+  final Map<String, bool> knownWords;
+  final Function(String) onUnmark;
+
+  KnownWordsPage({required this.knownWords, required this.onUnmark});
+
+  @override
+  State<KnownWordsPage> createState() => _KnownWordsPageState();
+}
+
+class _KnownWordsPageState extends State<KnownWordsPage> {
+  @override
+  Widget build(BuildContext context) {
+    final words = widget.knownWords.entries
+        .where((e) => e.value)
+        .map((e) => e.key)
+        .toList();
+
+    return Scaffold(
+      appBar: AppBar(title: Text('Known Words')),
+      body: words.isEmpty
+          ? Center(child: Text('No known words yet'))
+          : ListView.builder(
+              itemCount: words.length,
+              itemBuilder: (_, index) {
+                final word = words[index];
+                return ListTile(
+                  title: Text(word),
+                  trailing: IconButton(
+                    icon: Icon(Icons.delete),
+                    onPressed: () {
+                      widget.onUnmark(word);
+                      setState(() {});
+                    },
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
